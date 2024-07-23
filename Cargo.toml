@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# Ajoutez vos dépendances ici
+
+[dev-dependencies]
+# Ajoutez vos dépendances de développement ici
