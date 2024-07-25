@@ -1,21 +1,30 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use super::server::Server;
+use super::config::{
+    get_requested_path, DEFAULT_PAGE, ERROR_403_PAGE, ERROR_404_PAGE, ERROR_500_PAGE, TIMEOUT,
+};
 use super::connection::Connection;
-use super::config::{TIMEOUT, get_requested_path, DEFAULT_PAGE, ERROR_403_PAGE, ERROR_404_PAGE, ERROR_500_PAGE};
+use super::server::{Server, VirtualHost};
 use crate::utils::file_ops::{generate_response, read_file};
 
 pub struct MultiServer {
-    pub servers: Vec<Server>,
-    pub next_id: usize,
+    servers: Vec<Server>,
+    next_id: usize,
 }
 
 impl MultiServer {
-    pub fn new(addrs: &[&str]) -> std::io::Result<Self> {
+    pub fn new(configs: &[(&str, Vec<(&str, &str)>)]) -> std::io::Result<Self> {
         let mut servers = Vec::new();
-        for &addr in addrs {
-            servers.push(Server::new(addr)?);
+        for &(addr, ref vhosts) in configs {
+            let virtual_hosts = vhosts
+                .iter()
+                .map(|&(hostname, root_dir)| VirtualHost {
+                    hostname: hostname.to_string(),
+                    root_directory: root_dir.to_string(),
+                })
+                .collect();
+            servers.push(Server::new(addr, virtual_hosts)?);
         }
         Ok(MultiServer {
             servers,
@@ -58,7 +67,8 @@ impl MultiServer {
                             conn.buffer.extend_from_slice(&buffer[..n]);
                             conn.last_activity = Instant::now();
                             if Self::is_request_complete(&conn.buffer) {
-                                let response = Self::process_request(&conn.buffer);
+                                let response =
+                                    Self::process_request(self.servers[server_idx], &conn.buffer);
                                 conn.response = Some(response);
                                 conn.buffer.clear();
                                 ready_to_write.insert((server_idx, id));
@@ -123,13 +133,26 @@ impl MultiServer {
         buffer.windows(4).any(|window| window == b"\r\n\r\n")
     }
 
-    fn process_request(buffer: &[u8]) -> Vec<u8> {
+    fn process_request(server: &Server, buffer: &[u8]) -> Vec<u8> {
         let request = String::from_utf8_lossy(buffer);
-        let path = get_requested_path(&request);
-        let file_path = if path.is_empty() {
-            DEFAULT_PAGE.to_string()
+        let hostname = Self::get_hostname(&request);
+        let path = Self::get_requested_path(&request);
+
+        // Trouver le virtual host correspondant
+        let vhost = server
+            .virtual_hosts
+            .iter()
+            .find(|vh| vh.hostname == hostname);
+
+        let file_path = if let Some(vh) = vhost {
+            if path.is_empty() {
+                format!("{}/index.html", vh.root_directory)
+            } else {
+                format!("{}/{}", vh.root_directory, path)
+            }
         } else {
-            format!("src/www/{}", path)
+            // Utiliser un hôte par défaut ou renvoyer une erreur
+            "src/www/error/404.html".to_string()
         };
 
         match read_file(&file_path) {
@@ -144,10 +167,34 @@ impl MultiServer {
                     Err(_) => generate_response("403 FORBIDDEN", "text/plain", "403 Forbidden"),
                 },
                 _ => match read_file(ERROR_500_PAGE) {
-                    Ok(contents) => generate_response("500 INTERNAL SERVER ERROR", "text/html", &contents),
-                    Err(_) => generate_response("500 INTERNAL SERVER ERROR", "text/plain", "500 Internal Server Error"),
+                    Ok(contents) => {
+                        generate_response("500 INTERNAL SERVER ERROR", "text/html", &contents)
+                    }
+                    Err(_) => generate_response(
+                        "500 INTERNAL SERVER ERROR",
+                        "text/plain",
+                        "500 Internal Server Error",
+                    ),
                 },
             },
         }
+    }
+    fn get_requested_path(request: &str) -> String {
+        let lines: Vec<&str> = request.lines().collect();
+        if let Some(first_line) = lines.first() {
+            let parts: Vec<&str> = first_line.split_whitespace().collect();
+            if parts.len() > 1 {
+                return parts[1].trim_start_matches('/').to_string();
+            }
+        }
+        String::new()
+    }
+    fn get_hostname(request: &str) -> String {
+        for line in request.lines() {
+            if line.to_lowercase().starts_with("host:") {
+                return line.split(':').nth(1).unwrap_or("").trim().to_string();
+            }
+        }
+        String::new()
     }
 }
