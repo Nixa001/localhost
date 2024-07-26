@@ -9,13 +9,21 @@ use server::multiserver::MultiServer;
 fn main() -> std::io::Result<()> {
     let configs = [
         (
-            "127.0.0.1:8080",
+            "0.0.0.0:8080",
             vec![
-                ("test.com", "src/www/test"),
-                ("example.com", "src/www/example"),
+                ("server1.com", "src/www"),
+                ("localhost", "src/www"),
+                ("errors.com", "src/www/errors"),
             ],
         ),
-        ("127.0.0.1:8081", vec![("another.com", "src/www/another")]),
+        (
+            "0.0.0.0:8081",
+            vec![
+                ("server2.com", "src/www/server"),
+                ("localhost", "src/www/server"),
+                ("localhost", "src/www/server"),
+            ],
+        ),
     ];
     let mut multi_server = MultiServer::new(&configs)?;
     multi_server.run()

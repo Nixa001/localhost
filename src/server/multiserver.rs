@@ -1,9 +1,7 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use super::config::{
-    get_requested_path, DEFAULT_PAGE, ERROR_403_PAGE, ERROR_404_PAGE, ERROR_500_PAGE, TIMEOUT,
-};
+use super::config::{DEFAULT_PAGE, ERROR_403_PAGE, ERROR_404_PAGE, ERROR_500_PAGE, TIMEOUT};
 use super::connection::Connection;
 use super::server::{Server, VirtualHost};
 use crate::utils::file_ops::{generate_response, read_file};
@@ -54,8 +52,9 @@ impl MultiServer {
                 }
             }
 
-            // Process ready connections
             let mut to_remove = Vec::new();
+            let mut to_process = Vec::new();
+
             for &(server_idx, id) in &ready_to_read {
                 if let Some(conn) = self.servers[server_idx].connections.get_mut(&id) {
                     let mut buffer = [0; 1024];
@@ -67,11 +66,7 @@ impl MultiServer {
                             conn.buffer.extend_from_slice(&buffer[..n]);
                             conn.last_activity = Instant::now();
                             if Self::is_request_complete(&conn.buffer) {
-                                let response =
-                                    Self::process_request(self.servers[server_idx], &conn.buffer);
-                                conn.response = Some(response);
-                                conn.buffer.clear();
-                                ready_to_write.insert((server_idx, id));
+                                to_process.push((server_idx, id));
                             }
                         }
                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
@@ -79,6 +74,22 @@ impl MultiServer {
                             to_remove.push((server_idx, id));
                         }
                     }
+                }
+            }
+            for (server_idx, id) in to_process {
+                let request_buffer =
+                    if let Some(conn) = self.servers[server_idx].connections.get(&id) {
+                        conn.buffer.clone()
+                    } else {
+                        continue;
+                    };
+
+                let response = Self::process_request(&self.servers[server_idx], &request_buffer);
+
+                if let Some(conn) = self.servers[server_idx].connections.get_mut(&id) {
+                    conn.response = Some(response);
+                    conn.buffer.clear();
+                    ready_to_write.insert((server_idx, id));
                 }
             }
 
@@ -128,35 +139,45 @@ impl MultiServer {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
-
     fn is_request_complete(buffer: &[u8]) -> bool {
         buffer.windows(4).any(|window| window == b"\r\n\r\n")
     }
-
     fn process_request(server: &Server, buffer: &[u8]) -> Vec<u8> {
         let request = String::from_utf8_lossy(buffer);
         let hostname = Self::get_hostname(&request);
         let path = Self::get_requested_path(&request);
 
-        // Trouver le virtual host correspondant
+        println!("Requested hostname: {}", hostname);
+        println!("Requested path: {}", path);
+
+        // Find the corresponding virtual host
         let vhost = server
             .virtual_hosts
             .iter()
             .find(|vh| vh.hostname == hostname);
 
+        println!("Matching vhost: {:?}", vhost.map(|vh| &vh.hostname));
+
         let file_path = if let Some(vh) = vhost {
             if path.is_empty() {
-                format!("{}/index.html", vh.root_directory)
+                let fp = format!("{}/index.html", vh.root_directory);
+                println!("Attempting to serve default page: {}", fp);
+                fp
             } else {
-                format!("{}/{}", vh.root_directory, path)
+                let fp = format!("{}/{}", vh.root_directory, path);
+                println!("Attempting to serve: {}", fp);
+                fp
             }
         } else {
-            // Utiliser un hôte par défaut ou renvoyer une erreur
-            "src/www/error/404.html".to_string()
+            println!("No matching virtual host found, serving 404 page");
+            "src/www/errors/404.html".to_string()
         };
 
         match read_file(&file_path) {
-            Ok(contents) => generate_response("200 OK", "text/html", &contents),
+            Ok(contents) => {
+                println!("Successfully read file: {}", file_path);
+                generate_response("200 OK", "text/html", &contents)
+            }
             Err(e) => match e.kind() {
                 std::io::ErrorKind::NotFound => match read_file(ERROR_404_PAGE) {
                     Ok(contents) => generate_response("404 NOT FOUND", "text/html", &contents),
