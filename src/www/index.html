@@ -58,19 +58,44 @@
     <p>Nixa Localhost : SERVER 1</p>
 
     <div class="file-management">
-      <h2>Files management</h2>
+      <h2>Gestion des fichiers</h2>
       <form id="uploadForm" enctype="multipart/form-data">
         <input type="file" id="fileInput" name="file" multiple />
         <button type="submit">Upload</button>
       </form>
 
-      <h3>Uploaded files</h3>
+      <h3>Fichiers uploadés</h3>
       <ul class="file-list" id="fileList">
-        <!-- Les fichiers seront ajoutés ici dynamiquement -->
+        <!-- La liste des fichiers sera ajoutée ici dynamiquement -->
       </ul>
     </div>
 
     <script>
+      // Fonction pour charger la liste des fichiers
+      function loadFileList() {
+        fetch("/list_files")
+          .then((response) => response.json())
+          .then((files) => {
+            const fileList = document.getElementById("fileList");
+            fileList.innerHTML = ""; // Vider la liste actuelle
+            files.forEach((file) => {
+              const li = document.createElement("li");
+              li.className = "file-item";
+              li.innerHTML = `
+                  <span>${file}</span>
+                  <button class="delete-btn" onclick="deleteFile('${file}')">Delete</button>
+                `;
+              fileList.appendChild(li);
+            });
+          })
+          .catch((error) => {
+            console.error("Error loading file list:", error);
+          });
+      }
+
+      // Charger la liste des fichiers au chargement de la page
+      window.onload = loadFileList;
+
       document
         .getElementById("uploadForm")
         .addEventListener("submit", function (e) {
@@ -84,29 +109,12 @@
             .then((response) => response.text())
             .then((result) => {
               console.log(result);
-              updateFileList();
+              loadFileList(); // Recharger la liste des fichiers après l'upload
             })
             .catch((error) => {
               console.error("Error:", error);
             });
         });
-
-      function updateFileList() {
-        const fileInput = document.getElementById("fileInput");
-        const fileList = document.getElementById("fileList");
-
-        for (let file of fileInput.files) {
-          const li = document.createElement("li");
-          li.className = "file-item";
-          li.innerHTML = `
-              <span>${file.name}</span>
-              <button class="delete-btn" onclick="deleteFile('${file.name}')">Delete</button>
-            `;
-          fileList.appendChild(li);
-        }
-
-        fileInput.value = "";
-      }
 
       function deleteFile(fileName) {
         fetch(`/delete/${fileName}`, {
@@ -115,13 +123,7 @@
           .then((response) => response.text())
           .then((result) => {
             console.log(result);
-            // Remove the file from the list
-            const fileItem = document.querySelector(
-              `.file-item span:contains('${fileName}')`
-            ).parentNode;
-            if (fileItem) {
-              fileItem.remove();
-            }
+            loadFileList(); // Recharger la liste des fichiers après la suppression
           })
           .catch((error) => {
             console.error("Error:", error);
