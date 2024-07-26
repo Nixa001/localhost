@@ -1,16 +1,132 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welcome to Localhost</title>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Welcome to Localhost - Gestion de fichiers</title>
     <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; padding: 20px; }
-        h1 { color: #333; }
+      body {
+        font-family: Arial, sans-serif;
+        line-height: 1.6;
+        padding: 20px;
+        max-width: 800px;
+        margin: 0 auto;
+      }
+      h1 {
+        color: #333;
+      }
+      .file-management {
+        background-color: #f4f4f4;
+        padding: 20px;
+        border-radius: 5px;
+        margin-top: 20px;
+      }
+      .file-list {
+        list-style-type: none;
+        padding: 0;
+      }
+      .file-item {
+        background-color: #fff;
+        margin-bottom: 10px;
+        padding: 10px;
+        border-radius: 3px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .delete-btn {
+        background-color: #ff4d4d;
+        color: white;
+        border: none;
+        padding: 5px 10px;
+        border-radius: 3px;
+        cursor: pointer;
+      }
+      .upload-btn {
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 3px;
+        cursor: pointer;
+        margin-top: 10px;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <h1>Welcome to Localhost</h1>
     <p>Nixa Localhost : SERVER 1</p>
-</body>
+
+    <div class="file-management">
+      <h2>Files management</h2>
+      <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" id="fileInput" name="file" multiple />
+        <button type="submit">Upload</button>
+      </form>
+
+      <h3>Uploaded files</h3>
+      <ul class="file-list" id="fileList">
+        <!-- Les fichiers seront ajoutés ici dynamiquement -->
+      </ul>
+    </div>
+
+    <script>
+      document
+        .getElementById("uploadForm")
+        .addEventListener("submit", function (e) {
+          e.preventDefault();
+          const formData = new FormData(this);
+
+          fetch("/upload", {
+            method: "POST",
+            body: formData,
+          })
+            .then((response) => response.text())
+            .then((result) => {
+              console.log(result);
+              updateFileList();
+            })
+            .catch((error) => {
+              console.error("Error:", error);
+            });
+        });
+
+      function updateFileList() {
+        const fileInput = document.getElementById("fileInput");
+        const fileList = document.getElementById("fileList");
+
+        for (let file of fileInput.files) {
+          const li = document.createElement("li");
+          li.className = "file-item";
+          li.innerHTML = `
+              <span>${file.name}</span>
+              <button class="delete-btn" onclick="deleteFile('${file.name}')">Delete</button>
+            `;
+          fileList.appendChild(li);
+        }
+
+        fileInput.value = "";
+      }
+
+      function deleteFile(fileName) {
+        fetch(`/delete/${fileName}`, {
+          method: "DELETE",
+        })
+          .then((response) => response.text())
+          .then((result) => {
+            console.log(result);
+            // Remove the file from the list
+            const fileItem = document.querySelector(
+              `.file-item span:contains('${fileName}')`
+            ).parentNode;
+            if (fileItem) {
+              fileItem.remove();
+            }
+          })
+          .catch((error) => {
+            console.error("Error:", error);
+          });
+      }
+    </script>
+  </body>
 </html>
