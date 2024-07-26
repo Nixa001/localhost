@@ -13,7 +13,7 @@ fn main() -> std::io::Result<()> {
             vec![
                 ("server1.com", "src/www"),
                 ("localhost", "src/www"),
-                ("errors.com", "src/www/errors"),
+                // ("errors.com", "src/www/errors"),
             ],
         ),
         (
@@ -21,7 +21,7 @@ fn main() -> std::io::Result<()> {
             vec![
                 ("server2.com", "src/www/server"),
                 ("localhost", "src/www/server"),
-                ("localhost", "src/www/server"),
+                // ("localhost", "src/www/server"),
             ],
         ),
     ];

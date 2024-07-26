@@ -1,7 +1,9 @@
 use std::collections::HashSet;
+use std::fs;
+use std::io::Write;
 use std::time::{Duration, Instant};
 
-use super::config::{DEFAULT_PAGE, ERROR_403_PAGE, ERROR_404_PAGE, ERROR_500_PAGE, TIMEOUT};
+use super::config::{ERROR_403_PAGE, ERROR_404_PAGE, ERROR_405_PAGE, ERROR_500_PAGE, TIMEOUT};
 use super::connection::Connection;
 use super::server::{Server, VirtualHost};
 use crate::utils::file_ops::{generate_response, read_file};
@@ -10,7 +12,6 @@ pub struct MultiServer {
     servers: Vec<Server>,
     next_id: usize,
 }
-
 impl MultiServer {
     pub fn new(configs: &[(&str, Vec<(&str, &str)>)]) -> std::io::Result<Self> {
         let mut servers = Vec::new();
@@ -142,13 +143,34 @@ impl MultiServer {
     fn is_request_complete(buffer: &[u8]) -> bool {
         buffer.windows(4).any(|window| window == b"\r\n\r\n")
     }
+
     fn process_request(server: &Server, buffer: &[u8]) -> Vec<u8> {
         let request = String::from_utf8_lossy(buffer);
         let hostname = Self::get_hostname(&request);
         let path = Self::get_requested_path(&request);
+        let method = Self::get_request_method(&request);
 
         println!("Requested hostname: {}", hostname);
         println!("Requested path: {}", path);
+        println!("Request method: {}", method);
+
+        // Check if the method is allowed
+        if !["GET", "POST", "DELETE"].contains(&&method[..]) {
+            println!("Method not allowed: {}", method);
+            return match read_file(ERROR_405_PAGE) {
+                Ok(contents) => generate_response("405 METHOD NOT ALLOWED", "text/html", &contents),
+                Err(_) => generate_response(
+                    "405 METHOD NOT ALLOWED",
+                    "text/plain",
+                    "405 Method Not Allowed",
+                ),
+            };
+        }
+
+        // Handle file upload for POST requests
+        if method == "POST" && path == "upload" {
+            return Self::handle_file_upload(server, &request);
+        }
 
         // Find the corresponding virtual host
         let vhost = server
@@ -170,7 +192,7 @@ impl MultiServer {
             }
         } else {
             println!("No matching virtual host found, serving 404 page");
-            "src/www/errors/404.html".to_string()
+            ERROR_404_PAGE.to_string()
         };
 
         match read_file(&file_path) {
@@ -199,6 +221,103 @@ impl MultiServer {
                 },
             },
         }
+    }
+
+    fn handle_file_upload(server: &Server, request: &str) -> Vec<u8> {
+        let boundary = Self::get_boundary(request);
+        let parts = request.split(&boundary).collect::<Vec<&str>>();
+
+        for part in parts.iter().skip(1) {
+            if part.contains("filename=") {
+                let filename = Self::extract_filename(part);
+                let content = Self::extract_content(part);
+
+                let upload_dir = if server.listener.local_addr().unwrap().port() == 8080 {
+                    "src/www/upload/server1"
+                } else {
+                    "src/www/upload/server2"
+                };
+
+                if let Err(e) = fs::create_dir_all(upload_dir) {
+                    eprintln!("Failed to create upload directory: {}", e);
+                    return generate_response(
+                        "500 INTERNAL SERVER ERROR",
+                        "text/plain",
+                        "Failed to create upload directory",
+                    );
+                }
+
+                let file_path = format!("{}/{}", upload_dir, filename);
+                match fs::File::create(&file_path) {
+                    Ok(mut file) => {
+                        if let Err(e) = file.write_all(content.as_bytes()) {
+                            eprintln!("Failed to write file: {}", e);
+                            return generate_response(
+                                "500 INTERNAL SERVER ERROR",
+                                "text/plain",
+                                "Failed to write file",
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to create file: {}", e);
+                        return generate_response(
+                            "500 INTERNAL SERVER ERROR",
+                            "text/plain",
+                            "Failed to create file",
+                        );
+                    }
+                }
+
+                return generate_response("200 OK", "text/plain", "File uploaded successfully");
+            }
+        }
+
+        generate_response(
+            "400 BAD REQUEST",
+            "text/plain",
+            "No file found in the request",
+        )
+    }
+
+    fn get_boundary(request: &str) -> String {
+        for line in request.lines() {
+            if line.starts_with("Content-Type: multipart/form-data; boundary=") {
+                return line.split("boundary=").last().unwrap_or("").to_string();
+            }
+        }
+        String::new()
+    }
+
+    fn extract_filename(part: &str) -> String {
+        for line in part.lines() {
+            if line.contains("filename=") {
+                return line
+                    .split("filename=")
+                    .last()
+                    .unwrap_or("")
+                    .trim_matches('"')
+                    .to_string();
+            }
+        }
+        String::new()
+    }
+
+    fn extract_content(part: &str) -> String {
+        let content_start = part.find("\r\n\r\n").map(|i| i + 4).unwrap_or(0);
+        let content_end = part.rfind("\r\n").unwrap_or(part.len());
+        part[content_start..content_end].to_string()
+    }
+
+    fn get_request_method(request: &str) -> String {
+        let lines: Vec<&str> = request.lines().collect();
+        if let Some(first_line) = lines.first() {
+            let parts: Vec<&str> = first_line.split_whitespace().collect();
+            if !parts.is_empty() {
+                return parts[0].to_uppercase();
+            }
+        }
+        String::new()
     }
     fn get_requested_path(request: &str) -> String {
         let lines: Vec<&str> = request.lines().collect();
