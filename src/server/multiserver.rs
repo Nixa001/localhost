@@ -1,4 +1,5 @@
-use super::config::{ERROR_403_PAGE, ERROR_404_PAGE, ERROR_405_PAGE, ERROR_500_PAGE, TIMEOUT};
+// use super::config::{ERROR_403_PAGE, ERROR_500_PAGE};
+use super::config::{ERROR_404_PAGE, ERROR_405_PAGE, TIMEOUT};
 use super::connection::Connection;
 use super::server::{Server, VirtualHost};
 use crate::utils::file_ops::{generate_response, read_file};
@@ -155,57 +156,66 @@ impl MultiServer {
         println!("Requested path: {}", path);
         println!("Request method: {}", method);
 
-        // Check if the method is allowed
-        if !["GET", "POST", "DELETE"].contains(&&method[..]) {
-            println!("Method not allowed: {}", method);
-            return match read_file(ERROR_405_PAGE) {
-                Ok(contents) => generate_response("405 METHOD NOT ALLOWED", "text/html", &contents),
-                Err(_) => generate_response(
-                    "405 METHOD NOT ALLOWED",
-                    "text/plain",
-                    "405 Method Not Allowed",
-                ),
-            };
-        }
-
-        match (method.as_str(), path.as_str()) {
-            ("POST", "upload") => Self::handle_file_upload(server, &request),
-            ("GET", "list_files") => Self::handle_file_listing(server),
-            ("DELETE", path) if path.starts_with("delete/") => {
-                Self::handle_file_deletion(server, path)
-            }
-            ("GET", "") | ("GET", "index.html") => {
-                // Serve the index page
-                match read_file("src/www/index.html") {
-                    Ok(contents) => generate_response("200 OK", "text/html", &contents),
-                    Err(_) => {
-                        generate_response("404 NOT FOUND", "text/plain", "Index page not found")
+        // Vérification de la méthode et traitement de la requête
+        match method.as_str() {
+            "GET" | "POST" | "DELETE" => {
+                match (method.as_str(), path.as_str()) {
+                    ("POST", "upload") => Self::handle_file_upload(server, &request),
+                    ("GET", "list_files") => Self::handle_file_listing(server),
+                    ("DELETE", path) if path.starts_with("delete/") => {
+                        Self::handle_file_deletion(server, path)
                     }
-                }
-            }
-            ("GET", path) => {
-                // Serve static files
-                let file_path = format!("src/www/{}", path);
-                match read_file(&file_path) {
-                    Ok(contents) => {
-                        let content_type = Self::get_content_type(path);
-                        generate_response("200 OK", content_type, &contents)
+                    ("GET", "") | ("GET", "index.html") => {
+                        // Servir la page d'index
+                        match read_file("src/www/index.html") {
+                            Ok(contents) => generate_response("200 OK", "text/html", &contents),
+                            Err(_) => generate_response(
+                                "404 NOT FOUND",
+                                "text/plain",
+                                "Index page not found",
+                            ),
+                        }
                     }
-                    Err(_) => {
-                        // File not found, return 404
-                        match read_file(ERROR_404_PAGE) {
+                    ("GET", path) => {
+                        // Servir les fichiers statiques
+                        let file_path = format!("src/www/{}", path);
+                        match read_file(&file_path) {
                             Ok(contents) => {
-                                generate_response("404 NOT FOUND", "text/html", &contents)
+                                let content_type = Self::get_content_type(path);
+                                generate_response("200 OK", content_type, &contents)
                             }
                             Err(_) => {
-                                generate_response("404 NOT FOUND", "text/plain", "404 Not Found")
+                                // Fichier non trouvé, retourner 404
+                                match read_file(ERROR_404_PAGE) {
+                                    Ok(contents) => {
+                                        generate_response("404 NOT FOUND", "text/html", &contents)
+                                    }
+                                    Err(_) => generate_response(
+                                        "404 NOT FOUND",
+                                        "text/plain",
+                                        "404 Not Found",
+                                    ),
+                                }
                             }
+                        }
+                    }
+                    _ => {
+                        // Méthode non autorisée pour ce chemin
+                        match read_file(ERROR_405_PAGE) {
+                            Ok(contents) => {
+                                generate_response("405 METHOD NOT ALLOWED", "text/html", &contents)
+                            }
+                            Err(_) => generate_response(
+                                "405 METHOD NOT ALLOWED",
+                                "text/plain",
+                                "405 Method Not Allowed",
+                            ),
                         }
                     }
                 }
             }
             _ => {
-                // Method not allowed for this path
+                // Méthode non autorisée
                 match read_file(ERROR_405_PAGE) {
                     Ok(contents) => {
                         generate_response("405 METHOD NOT ALLOWED", "text/html", &contents)
@@ -219,6 +229,7 @@ impl MultiServer {
             }
         }
     }
+
     fn get_content_type(path: &str) -> &'static str {
         match Path::new(path).extension().and_then(OsStr::to_str) {
             Some("html") => "text/html",
@@ -231,28 +242,35 @@ impl MultiServer {
         }
     }
     fn handle_file_deletion(server: &Server, path: &str) -> Vec<u8> {
-        let file_name = path.strip_prefix("delete/").unwrap_or("");
+        let file_name = path.strip_prefix("delete/").unwrap_or(path);
         let upload_dir = if server.listener.local_addr().unwrap().port() == 8080 {
-            "www/upload/server1"
+            "src/www/upload/server1"
         } else {
-            "www/upload/server2"
+            "src/www/upload/server2"
         };
+        let file_path = Path::new(upload_dir).join(file_name.replace("%20", " "));
 
-        let file_path = Path::new(upload_dir).join(file_name);
+        println!("Attempting to delete file: {:?}", file_path);
+        println!("File exists: {}", file_path.exists());
+        println!("Is file: {}", file_path.is_file());
 
         if file_path.is_file() {
-            match fs::remove_file(file_path) {
-                Ok(_) => generate_response("200 OK", "text/plain", "File deleted successfully"),
+            match fs::remove_file(&file_path) {
+                Ok(_) => {
+                    println!("File successfully deleted");
+                    generate_response("200 OK", "text/plain", "File deleted successfully")
+                }
                 Err(e) => {
                     eprintln!("Failed to delete file: {}", e);
                     generate_response(
                         "500 INTERNAL SERVER ERROR",
                         "text/plain",
-                        "Failed to delete file",
+                        &format!("Failed to delete file: {}", e),
                     )
                 }
             }
         } else {
+            println!("File not found at path: {:?}", file_path);
             generate_response("404 NOT FOUND", "text/plain", "File not found")
         }
     }
@@ -281,9 +299,10 @@ impl MultiServer {
                 }
 
                 let file_path = format!("{}/{}", upload_dir, filename);
+
                 match fs::File::create(&file_path) {
                     Ok(mut file) => {
-                        if let Err(e) = file.write_all(content.as_bytes()) {
+                        if let Err(e) = file.write_all(&content) {
                             eprintln!("Failed to write file: {}", e);
                             return generate_response(
                                 "500 INTERNAL SERVER ERROR",
@@ -362,10 +381,12 @@ impl MultiServer {
         String::new()
     }
 
-    fn extract_content(part: &str) -> String {
-        let content_start = part.find("\r\n\r\n").map(|i| i + 4).unwrap_or(0);
-        let content_end = part.rfind("\r\n").unwrap_or(part.len());
-        part[content_start..content_end].to_string()
+    fn extract_content(part: &str) -> Vec<u8> {
+        if let Some(content_start) = part.find("\r\n\r\n") {
+            part[content_start + 4..].as_bytes().to_vec()
+        } else {
+            Vec::new() // Retourner un vecteur vide si le contenu n'est pas trouvé
+        }
     }
 
     fn get_request_method(request: &str) -> String {
