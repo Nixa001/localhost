@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Welcome to Localhost - Gestion de fichiers</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        line-height: 1.6;
+        padding: 20px;
+        max-width: 800px;
+        margin: 0 auto;
+      }
+      h1 {
+        color: #333;
+      }
+      .file-management {
+        background-color: #f4f4f4;
+        padding: 20px;
+        border-radius: 5px;
+        margin-top: 20px;
+      }
+      .file-list {
+        list-style-type: none;
+        padding: 0;
+      }
+      .file-item {
+        background-color: #fff;
+        margin-bottom: 10px;
+        padding: 10px;
+        border-radius: 3px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .delete-btn {
+        background-color: #ff4d4d;
+        color: white;
+        border: none;
+        padding: 5px 10px;
+        border-radius: 3px;
+        cursor: pointer;
+      }
+      .upload-btn {
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 3px;
+        cursor: pointer;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Welcome to Localhost</h1>
+    <p>Nixa Localhost : SERVER 1</p>
+
+    <div class="file-management">
+      <h2>Gestion des fichiers</h2>
+      <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" id="fileInput" name="file" multiple />
+        <button type="submit">Upload</button>
+      </form>
+
+      <h3>Fichiers uploadés</h3>
+      <ul class="file-list" id="fileList">
+        <!-- La liste des fichiers sera ajoutée ici dynamiquement -->
+      </ul>
+    </div>
+
+    <script>
+      // Fonction pour charger la liste des fichiers
+      function loadFileList() {
+        fetch("/list_files")
+          .then((response) => response.json())
+          .then((files) => {
+            const fileList = document.getElementById("fileList");
+            fileList.innerHTML = ""; // Vider la liste actuelle
+            files.forEach((file) => {
+              const li = document.createElement("li");
+              li.className = "file-item";
+              li.innerHTML = `
+                  <span>${file}</span>
+                  <button class="delete-btn" onclick="deleteFile('${file}')">Delete</button>
+                `;
+              fileList.appendChild(li);
+            });
+          })
+          .catch((error) => {
+            console.error("Error loading file list:", error);
+          });
+      }
+
+      // Charger la liste des fichiers au chargement de la page
+      window.onload = loadFileList;
+
+      document
+        .getElementById("uploadForm")
+        .addEventListener("submit", function (e) {
+          e.preventDefault();
+          const formData = new FormData(this);
+
+          fetch("/upload", {
+            method: "POST",
+            body: formData,
+          })
+            .then((response) => response.text())
+            .then((result) => {
+              console.log(result);
+              loadFileList(); // Recharger la liste des fichiers après l'upload
+            })
+            .catch((error) => {
+              console.error("Error:", error);
+            });
+        });
+
+      function deleteFile(fileName) {
+        fetch(`/delete/${fileName}`, {
+          method: "DELETE",
+        })
+          .then((response) => response.text())
+          .then((result) => {
+            console.log(result);
+
+            loadFileList(); // Recharger la liste des fichiers après la suppression
+          })
+          .catch((error) => {
+            console.error("Error:", error);
+          });
+      }
+    </script>
+  </body>
+</html>
