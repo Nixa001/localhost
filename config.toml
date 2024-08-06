@@ -1,0 +1,35 @@
+server: server1
+host: 127.0.0.1
+port: 8080
+route: /
+methods: GET POST DELETE
+root: ./www1
+index: index.html
+directory_listing: on
+client_max_body_size: 1024
+
+server: server2
+host: 127.0.0.2
+port: 8081
+route: /
+methods: GET POST DELETE
+root: ./www2
+index: index.html
+directory_listing: off
+
+server: server3
+host: 127.0.0.1
+port: 8083
+
+route: /
+redirect: / /admin
+methods: GET
+root: ./www3
+index: index.html
+directory_listing: off
+
+route: /admin
+methods: GET
+root: ./www3
+protected: true
+index: index.html

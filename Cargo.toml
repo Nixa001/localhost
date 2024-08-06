@@ -1,12 +1,11 @@
 [package]
-name = "localhost"
+name = "localhostv3"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-mio = { version = "0.8", features = ["os-poll", "net"] }
-serde_json = "1.0"
 libc = "0.2"
-httparse = "1.7.0"        # Pour parser les en-têtes HTTP
-multipart = "0.17.0"      # Pour gérer les formulaires multipart
+mio = { version = "0.8", features = ["os-poll", "net"] }
+uuid = { version = "0.8", features = ["v4"] }
 chrono = "0.4"
+mime_guess = "2.0"
