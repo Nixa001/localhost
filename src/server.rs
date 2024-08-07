@@ -230,8 +230,8 @@ impl Server {
             r#"<div class="upload-form">
                 <h2>Upload File</h2>
                 <form action="{}" method="post" enctype="multipart/form-data">
-                    <input type="file" name="file" />
-                    <input type="submit" value="Upload" />
+                    <input type="file" name="file" required/>
+                    <input type="submit" value="Upload"  />
                 </form>
             </div>"#,
             request_path
