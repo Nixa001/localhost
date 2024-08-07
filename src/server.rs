@@ -17,11 +17,12 @@ use std::io::{self, Read, Write};
 use std::net::SocketAddr;
 use std::net::TcpListener as StdTcpListener;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_EVENTS: usize = 1024;
+const MAX_EVENTS: usize = 1024 * 1024 * 10;
 
 pub struct Server {
     configs: HashMap<String, ServerConfig>,
@@ -101,10 +102,8 @@ impl Server {
         }
 
         let error_handler = ErrorHandler::new(&config_map.values().next().unwrap());
-        let cgi_handler = CGIHandler::new(
-            "/usr/local/bin/php".to_string(),
-            "/usr/local/bin/python3".to_string(),
-        );
+        let cgi_handler =
+            CGIHandler::new("/usr/bin/php".to_string(), "/usr/bin/python3".to_string());
         let session_manager = SessionManager::new(std::time::Duration::from_secs(3600));
         let listeners_len = listeners.len();
 
@@ -136,27 +135,42 @@ impl Server {
             let metadata = entry.metadata()?;
             let size = metadata.len();
             let modified: DateTime<Local> = metadata.modified()?.into();
-
             entries.push((file_name, file_type.is_dir(), size, modified));
         }
-
         entries.sort_by(|a, b| a.0.cmp(&b.0)); // Tri alphabétique
 
         let mut html = String::from(
-            "<!DOCTYPE html><html><head><title>Directory Listing</title></head><body>",
+            r#"<!DOCTYPE html>
+    <html>
+    <head>
+        <title>Directory Listing</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f0f0f0; }
+            h1 { color: #333; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; background-color: white; }
+            th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+            th { background-color: #4CAF50; color: white; }
+            tr:hover { background-color: #f5f5f5; }
+            a { color: #1a73e8; text-decoration: none; }
+            a:hover { text-decoration: underline; }
+            .upload-form { background-color: white; padding: 20px; border-radius: 5px; }
+            .upload-form input[type="file"] { margin-right: 10px; }
+            .upload-form input[type="submit"], .delete-btn { 
+                background-color: #4CAF50; 
+                color: white; 
+                border: none; 
+                padding: 5px 10px; 
+                cursor: pointer; 
+                border-radius: 3px;
+            }
+            .delete-btn { background-color: #f44336; }
+        </style>
+    </head>
+    <body>"#,
         );
-        html.push_str(&format!("<h1>Directory Listing for {}</h1>", request_path));
 
-        // Ajouter le formulaire d'upload
-        html.push_str(&format!(
-            r#"<form action="{}" method="post" enctype="multipart/form-data">
-                <input type="file" name="file" />
-                <input type="submit" value="Upload" />
-            </form>"#,
-            request_path
-        ));
-
-        html.push_str("<table border='1'><tr><th>Name</th><th>Type</th><th>Size</th><th>Last Modified</th><th>Actions</th></tr>");
+        html.push_str(&format!("<h1>Directory Listing:  {}</h1>", request_path));
+        html.push_str("<table><tr><th>Name</th><th>Type</th><th>Size</th><th>Last Modified</th><th>Actions</th></tr>");
 
         if request_path != "/" {
             let parent = Path::new(request_path)
@@ -175,7 +189,6 @@ impl Server {
             } else {
                 format!("{}/{}", request_path, name)
             };
-
             html.push_str("<tr>");
             html.push_str(&format!("<td><a href='{}'>{}</a></td>", full_path, name));
             html.push_str(&format!(
@@ -194,14 +207,12 @@ impl Server {
                 "<td>{}</td>",
                 modified.format("%Y-%m-%d %H:%M:%S")
             ));
-
-            // Ajouter le bouton de suppression pour les fichiers
             if !is_dir {
                 html.push_str(&format!(
                     r#"<td>
-                    <form action="{}" method="post">
+                    <form action="{}" method="post" style="display:inline;">
                         <input type="hidden" name="_method" value="DELETE" />
-                        <input type="submit" value="Delete" />
+                        <input type="submit" value="Delete" class="delete-btn" />
                     </form>
                 </td>"#,
                     full_path
@@ -209,15 +220,26 @@ impl Server {
             } else {
                 html.push_str("<td></td>");
             }
-
             html.push_str("</tr>");
         }
 
-        html.push_str("</table></body></html>");
+        html.push_str("</table>");
 
+        // Ajouter le formulaire d'upload en bas du tableau
+        html.push_str(&format!(
+            r#"<div class="upload-form">
+                <h2>Upload File</h2>
+                <form action="{}" method="post" enctype="multipart/form-data">
+                    <input type="file" name="file" />
+                    <input type="submit" value="Upload" />
+                </form>
+            </div>"#,
+            request_path
+        ));
+
+        html.push_str("</body></html>");
         Ok(HttpResponse::new(200, html.into_bytes(), "text/html"))
     }
-
     pub fn run(&mut self) -> Result<(), ServerError> {
         let mut events = Events::with_capacity(MAX_EVENTS);
 
@@ -406,7 +428,6 @@ impl Server {
         }
         String::new()
     }
-
     fn handle_login(&mut self, request: &HttpRequest) -> Result<HttpResponse, ServerError> {
         if request.method == HttpMethod::POST {
             // Check credentials
@@ -418,12 +439,9 @@ impl Server {
                     Some((parts.next()?, parts.next()?))
                 })
                 .collect();
-
-            if params.get("username") == Some(&"admin") && params.get("password") == Some(&"admin")
-            {
+            if params.get("username") == Some(&"user") && params.get("password") == Some(&"123") {
                 let session_id = self.create_session_id(request);
                 self.session_manager.authenticate(&session_id);
-
                 let mut response = HttpResponse::new(302, Vec::new(), "text/plain");
                 response
                     .headers
@@ -438,17 +456,78 @@ impl Server {
 
         // Display login form
         let login_form = r#"
-        <!DOCTYPE html>
-        <html>
-        <body>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Login</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                background-color: #f0f0f0;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+            }
+            .login-container {
+                background-color: white;
+                padding: 2rem;
+                border-radius: 8px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                width: 300px;
+            }
+            h2 {
+                text-align: center;
+                color: #333;
+            }
+            form {
+                display: flex;
+                flex-direction: column;
+            }
+            label {
+                margin-top: 1rem;
+                color: #555;
+            }
+            input[type="text"], input[type="password"] {
+                padding: 0.5rem;
+                margin-top: 0.5rem;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+            input[type="submit"] {
+                margin-top: 1.5rem;
+                padding: 0.75rem;
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: background-color 0.3s;
+            }
+            input[type="submit"]:hover {
+                background-color: #45a049;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="login-container">
+            <h2>Login</h2>
             <form method="post" action="/login">
-                Username: <input type="text" name="username"><br>
-                Password: <input type="password" name="password"><br>
+                <label for="username">Username:</label>
+                <input type="text" id="username" name="username" required>
+                
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" required>
+                
                 <input type="submit" value="Login">
             </form>
-        </body>
-        </html>
-        "#;
+        </div>
+    </body>
+    </html>
+    "#;
 
         Ok(HttpResponse::new(
             200,
@@ -456,7 +535,6 @@ impl Server {
             "text/html",
         ))
     }
-
     fn is_cgi_request(&self, file_path: &str) -> bool {
         file_path.ends_with(".php") || file_path.ends_with(".py")
     }
@@ -552,40 +630,47 @@ impl Server {
         self.logger
             .info(&format!("Request body size: {} bytes", request.body.len()));
 
+        // Log all headers for debugging
+        for (key, value) in &request.headers {
+            self.logger.info(&format!("Header: {} = {}", key, value));
+        }
+
         if let Some(content_type) = request.headers.get("content-type") {
             if content_type.starts_with("multipart/form-data") {
-                // Créer le dossier uploads s'il n'existe pas
                 let uploads_dir = Path::new(&route_match.route.root).join("uploads");
-                let _ = fs::create_dir_all(&uploads_dir).map_err(|e| {
+                if let Err(e) = fs::create_dir_all(&uploads_dir) {
                     self.logger
                         .error(&format!("Failed to create uploads directory: {}", e));
                     return HttpResponse::new(500, b"Internal Server Error".to_vec(), "text/plain");
-                });
+                }
 
-                // Chercher le nom du fichier dans les en-têtes
-                let filename = request
-                    .headers
-                    .get("content-disposition")
-                    .and_then(|disp| {
-                        disp.split(';')
-                            .find(|part| part.trim().starts_with("filename="))
-                    })
-                    .and_then(|filename| filename.split('=').nth(1))
-                    .map(|filename| filename.trim_matches('"'))
-                    .unwrap_or("uploaded_file");
+                // Nouvelle méthode d'extraction du nom de fichier
+                let filename = self
+                    .extract_filename_from_body(&request.body)
+                    .unwrap_or_else(|| {
+                        self.logger
+                            .warn("Failed to extract filename from body, falling back to headers");
+                        self.extract_filename_from_headers(&request.headers)
+                            .unwrap_or_else(|| {
+                                self.logger
+                                    .warn("Failed to extract filename from headers, using default");
+                                "uploaded_file".to_string()
+                            })
+                    });
 
-                // Chemin complet du fichier
-                let file_path = uploads_dir.join(filename);
+                self.logger
+                    .info(&format!("Extracted filename: {}", filename));
 
-                // Extraire le contenu réel du fichier
+                let safe_filename = sanitize_filename(&filename);
+                let file_path = get_unique_filename(&uploads_dir, &safe_filename);
+
                 let content = extract_file_content(&request.body);
 
-                // Écrire le contenu du fichier
-                let _ = fs::write(&file_path, content).map_err(|e| {
+                if let Err(e) = fs::write(&file_path, content) {
                     self.logger
                         .error(&format!("Failed to save uploaded file: {}", e));
                     return HttpResponse::new(500, b"Failed to save file".to_vec(), "text/plain");
-                });
+                }
 
                 self.logger.info(&format!("File saved: {:?}", file_path));
                 HttpResponse::new(200, b"File uploaded successfully".to_vec(), "text/plain")
@@ -605,6 +690,52 @@ impl Server {
         }
     }
 
+    fn extract_filename_from_body(&self, body: &[u8]) -> Option<String> {
+        let body_str = std::str::from_utf8(body).ok()?;
+        let lines: Vec<&str> = body_str.lines().collect();
+
+        for (i, line) in lines.iter().enumerate() {
+            if line.contains("Content-Disposition:") && line.contains("filename=") {
+                self.logger
+                    .info(&format!("Found Content-Disposition line: {}", line));
+                if let Some(filename) = line.split("filename=").nth(1) {
+                    let filename = filename.trim_matches('"');
+                    self.logger
+                        .info(&format!("Extracted filename from body: {}", filename));
+                    return Some(filename.to_string());
+                }
+            }
+            // Log a few lines around the Content-Disposition for context
+            if i > 0 {
+                self.logger
+                    .info(&format!("Previous line: {}", lines[i - 1]));
+            }
+            if i < lines.len() - 1 {
+                self.logger.info(&format!("Next line: {}", lines[i + 1]));
+            }
+        }
+
+        self.logger.warn("Could not find filename in body");
+        None
+    }
+
+    fn extract_filename_from_headers(&self, headers: &HashMap<String, String>) -> Option<String> {
+        headers.get("content-disposition").and_then(|disp| {
+            self.logger
+                .info(&format!("Content-Disposition header: {}", disp));
+            disp.split(';').find_map(|part| {
+                let part = part.trim();
+                if part.starts_with("filename=") {
+                    let filename = part.trim_start_matches("filename=").trim_matches('"');
+                    self.logger
+                        .info(&format!("Extracted filename from header: {}", filename));
+                    Some(filename.to_string())
+                } else {
+                    None
+                }
+            })
+        })
+    }
     fn handle_client(&mut self, token: Token) -> io::Result<()> {
         self.logger.info(&format!("Handling client: {:?}", token));
         if !self.clients.contains_key(&token) {
@@ -849,4 +980,30 @@ fn extract_file_content(body: &[u8]) -> Vec<u8> {
         // Si on ne trouve pas la ligne "Content-Type:", on retourne le body tel quel
         body.to_vec()
     }
+}
+
+fn sanitize_filename(filename: &str) -> String {
+    filename
+        .chars()
+        .filter(|&c| c.is_alphanumeric() || c == '.' || c == '-' || c == '_')
+        .collect()
+}
+
+fn get_unique_filename(dir: &Path, filename: &str) -> PathBuf {
+    let file_stem = Path::new(filename).file_stem().unwrap().to_str().unwrap();
+    let extension = Path::new(filename)
+        .extension()
+        .unwrap_or_default()
+        .to_str()
+        .unwrap();
+    let mut counter = 0;
+    let mut file_path = dir.join(filename);
+
+    while file_path.exists() {
+        counter += 1;
+        let new_filename = format!("{}_{}.{}", file_stem, counter, extension);
+        file_path = dir.join(new_filename);
+    }
+
+    file_path
 }

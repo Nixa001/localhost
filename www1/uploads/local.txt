@@ -1,0 +1,53 @@
+Create a Complete HTTP Server in Rust
+
+General Requirements:
+
+    Language: Rust
+    System Calls: Use the libc crate for system calls like epoll, adapting for Windows-specific calls if needed.
+    Unsafe Code: Use unsafe only when absolutely necessary.
+    External Crates: Avoid using crates with built-in server features (e.g., tokio, nix).
+
+Server Functionality:
+
+    Reliability: Ensure the server is robust, handles errors gracefully, and never crashes.
+    Timeouts: Implement request timeouts for long-running requests.
+    Concurrency: Support listening on multiple ports and handling multiple server instances concurrently within a single process/thread.
+    Single Process/Thread: Operate with a single process and thread.
+    Request Handling: Process client requests and send responses with correct HTTP headers and bodies, ensuring full compliance with HTTP/1.1.
+    Method Support: Handle GET, POST, and DELETE methods.
+    File Uploads: Support file uploads from clients.
+    Cookies & Sessions: Manage cookies and sessions.
+    Error Pages: Provide default error pages for HTTP status codes 400, 403, 404, 405, 413, and 500.
+    Epoll Usage: Use epoll (or Windows-specific equivalent like IOCP) only once per client/server communication.
+    Non-blocking I/O: Ensure all I/O operations are non-blocking.
+    Request Management: Handle both chunked and unchunked requests, and set correct status codes for responses.
+
+CGI Implementation:
+
+    CGI Execution: Execute CGI scripts based on file extension (e.g., .php, .py).
+    Process Handling: Fork a new process to run the CGI script.
+    CGI Arguments: Pass the file to be processed as the first argument and use EOF to signal the end of the body.
+    Directory Handling: Ensure correct relative path handling for CGI execution.
+
+Configuration File:
+
+    Server Details: Define server_address and multiple ports. Specify a default server if server_name doesn’t match.
+    Error Pages: Path to custom error pages.
+    Upload Limits: Limit the size of client uploads.
+    Routing: Define routes with:
+        Accepted HTTP methods.
+        HTTP redirections.
+        Directory or file paths for content.
+        Default files for directories.
+        CGI settings for specific file extensions.
+        Directory listing toggles.
+    Configuration Parsing: Ignore comments ("#") and do not use regex for routes. No need for epoll to read the configuration file.
+
+Testing:
+
+    Stress Testing: Perform stress tests using tools like siege or wrk to ensure server availability (99.5% uptime).
+    Test Cases: Develop comprehensive tests for redirections, bad configurations, static and dynamic pages, and error pages.
+    Memory Management: Check for memory leaks before submission.
+    Tool Usage Warning: Use stress testing tools only on your own server. Unauthorized testing on other servers is illegal.
+
+Objective: Develop a high-reliability HTTP server in Rust that meets all the above requirements, encapsulated within a single file. Ensure the server is free from memory leaks and maintains high availability.

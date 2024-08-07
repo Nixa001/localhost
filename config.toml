@@ -6,7 +6,7 @@ methods: GET POST DELETE
 root: ./www1
 index: index.html
 directory_listing: on
-client_max_body_size: 1024
+client_max_body_size: 10485760
 
 server: server2
 host: 127.0.0.2
