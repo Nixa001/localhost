@@ -16,6 +16,8 @@ pub struct HttpRequest {
     pub headers: HashMap<String, String>,
     pub body: Vec<u8>,
     pub host: Option<String>,
+    pub chunked: bool,
+    pub chunks: Vec<Vec<u8>>,
 }
 
 impl HttpRequest {
@@ -37,12 +39,13 @@ impl HttpRequest {
             "DELETE" => HttpMethod::DELETE,
             _ => HttpMethod::UNSUPPORTED,
         };
-
         let path = first_line[1].to_string();
         let version = first_line[2].to_string();
+
         let mut headers = HashMap::new();
         let mut body_start = 0;
         let mut host = None;
+        let mut chunked = false;
 
         for (i, line) in lines[1..].iter().enumerate() {
             if line.is_empty() {
@@ -55,16 +58,24 @@ impl HttpRequest {
                 let value = parts[1].to_string();
                 if key == "host" {
                     host = Some(value.clone());
+                } else if key == "transfer-encoding" && value.to_lowercase() == "chunked" {
+                    chunked = true;
                 }
                 headers.insert(key, value);
             }
         }
 
-        let body = if body_start < lines.len() {
+        let mut body = if body_start < lines.len() {
             lines[body_start..].join("\n").into_bytes()
         } else {
             Vec::new()
         };
+
+        let mut chunks = Vec::new();
+        if chunked {
+            chunks = Self::parse_chunks(&body)?;
+            body = chunks.concat();
+        }
 
         Ok(HttpRequest {
             method,
@@ -73,7 +84,92 @@ impl HttpRequest {
             headers,
             body,
             host,
+            chunked,
+            chunks,
         })
+    }
+
+    fn parse_chunks(body: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+        let mut chunks = Vec::new();
+        let mut remaining = body;
+
+        while !remaining.is_empty() {
+            let mut chunk_size_end = 0;
+            for (i, &byte) in remaining.iter().enumerate() {
+                if byte == b'\r' && remaining.get(i + 1) == Some(&b'\n') {
+                    chunk_size_end = i;
+                    break;
+                }
+            }
+
+            let chunk_size = String::from_utf8_lossy(&remaining[..chunk_size_end]);
+            let chunk_size = usize::from_str_radix(&chunk_size, 16)
+                .map_err(|_| "Invalid chunk size".to_string())?;
+
+            if chunk_size == 0 {
+                break;
+            }
+
+            let chunk_start = chunk_size_end + 2;
+            let chunk_end = chunk_start + chunk_size;
+
+            if remaining.len() < chunk_end + 2 {
+                return Err("Incomplete chunk".to_string());
+            }
+
+            chunks.push(remaining[chunk_start..chunk_end].to_vec());
+            remaining = &remaining[chunk_end + 2..];
+        }
+
+        Ok(chunks)
+    }
+
+    pub fn append_chunk(&mut self, data: &[u8]) -> Result<(), String> {
+        if !self.chunked {
+            return Err("Request is not chunked".to_string());
+        }
+
+        let mut remaining = data;
+        while !remaining.is_empty() {
+            let mut chunk_size_end = 0;
+            for (i, &byte) in remaining.iter().enumerate() {
+                if byte == b'\r' && remaining.get(i + 1) == Some(&b'\n') {
+                    chunk_size_end = i;
+                    break;
+                }
+            }
+
+            let chunk_size = String::from_utf8_lossy(&remaining[..chunk_size_end]);
+            let chunk_size = usize::from_str_radix(&chunk_size, 16)
+                .map_err(|_| "Invalid chunk size".to_string())?;
+
+            if chunk_size == 0 {
+                self.chunks.push(Vec::new());
+                break;
+            }
+
+            let chunk_start = chunk_size_end + 2;
+            let chunk_end = chunk_start + chunk_size;
+
+            if remaining.len() < chunk_end + 2 {
+                return Err("Incomplete chunk".to_string());
+            }
+
+            self.chunks.push(remaining[chunk_start..chunk_end].to_vec());
+            remaining = &remaining[chunk_end + 2..];
+        }
+
+        Ok(())
+    }
+
+    pub fn is_chunked_request_complete(&self) -> bool {
+        if !self.chunked {
+            return true;
+        }
+
+        self.chunks
+            .last()
+            .map_or(false, |last_chunk| last_chunk.is_empty())
     }
 }
 
@@ -122,5 +218,4 @@ impl HttpResponse {
             body: ResponseBody::Chunked(chunks),
         }
     }
-
 }

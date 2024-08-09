@@ -1,7 +1,6 @@
 use crate::cgi::CGIHandler;
 use crate::config::ServerConfig;
 use crate::error::ServerError;
-use crate::error_handler::ErrorHandler;
 use crate::http::{HttpMethod, HttpRequest, HttpResponse, ResponseBody};
 use crate::logger;
 use crate::router::{RouteMatch, RouteMatchResult, Router};
@@ -31,7 +30,6 @@ pub struct Server {
     clients: HashMap<Token, (TcpStream, String)>,     // String est l'ID du serveur
     routers: HashMap<String, Router>,                 // String est l'ID du serveur
     next_token: usize,
-    error_handler: ErrorHandler,
     cgi_handler: CGIHandler,
     session_manager: SessionManager,
     logger: Arc<Logger>,
@@ -101,7 +99,6 @@ impl Server {
             ));
         }
 
-        let error_handler = ErrorHandler::new(&config_map.values().next().unwrap());
         let cgi_handler =
             CGIHandler::new("/usr/bin/php".to_string(), "/usr/bin/python3".to_string());
         let session_manager = SessionManager::new(std::time::Duration::from_secs(3600));
@@ -114,7 +111,6 @@ impl Server {
             clients: HashMap::new(),
             next_token: listeners_len + 1,
             routers,
-            error_handler,
             cgi_handler,
             session_manager,
             logger,
@@ -443,7 +439,7 @@ impl Server {
                 let session_id = self.create_session_id(request);
                 self.session_manager.authenticate(&session_id);
                 let mut response = HttpResponse::new(302, Vec::new(), "text/plain");
-                response
+                response 
                     .headers
                     .insert("Location".to_string(), "/".to_string());
                 response.headers.insert(
@@ -595,6 +591,13 @@ impl Server {
         if request.body.len() > config.client_max_body_size {
             return self.create_error_response(413);
         }
+
+        let body = if request.chunked {
+            request.chunks.concat()
+        } else {
+            request.body.clone()
+        };
+
         let content_type = request
             .headers
             .get("content-type")
@@ -770,15 +773,25 @@ impl Server {
                     self.remove_client(token)?;
                     Ok(None)
                 }
-                Ok(n) => {
-                    let request = HttpRequest::parse(&buffer[..n]);
-                    if request.is_err() && n == buffer.len() {
-                        return Ok(None);
+                Ok(n) => match HttpRequest::parse(&buffer[..n]) {
+                    Ok(mut request) if request.chunked => {
+                        while !request.is_chunked_request_complete() {
+                            match stream.read(&mut buffer) {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    if let Err(e) = request.append_chunk(&buffer[..n]) {
+                                        return Err(io::Error::new(io::ErrorKind::InvalidData, e));
+                                    }
+                                }
+                                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                        Ok(Some(request))
                     }
-                    request
-                        .map(Some)
-                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-                }
+                    Ok(request) => Ok(Some(request)),
+                    Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
+                },
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                     self.logger.info("Would block on read, trying again later");
                     Ok(None)

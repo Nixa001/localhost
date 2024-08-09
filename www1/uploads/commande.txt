@@ -1,0 +1,33 @@
+commande: 
+
+export GOMODCACHE=$HOME/go/pkg/mod
+
+
+
+Télécharger la dernière version de Golang:
+
+curl -L https://go.dev/dl/go<version>.linux-amd64.tar.gz -o go.tar.gz
+
+Décompresser le fichier d'installation:
+
+tar -xvzf go.tar.gz
+
+Définir la variable d'environnement GOROOT:
+
+echo 'export GOROOT=$HOME/go' >> ~/.bashrc
+
+Rechargez le fichier ~/.bashrc:
+
+source ~/.bashrc
+
+Créer un lien symbolique vers go:
+
+sudo ln -s $HOME/go/bin/go /usr/local/bin/go
+
+Vérifier que la nouvelle version de Golang est installée:
+
+go version
+
+Supprimer l'ancienne version de Golang (facultatif):
+
+rm -rf $HOME/go

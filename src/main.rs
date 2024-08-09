@@ -16,39 +16,42 @@ use std::sync::Arc;
 use std::{fs, process};
 
 fn main() {
-    // Initialize the logger
+    // Initialiser le logger
     let logger = match Logger::new("server.log") {
         Ok(l) => Arc::new(l),
         Err(e) => {
-            eprintln!("Failed to initialize logger: {}", e);
+            eprintln!("Échec de l'initialisation du logger : {}", e);
             process::exit(1);
         }
     };
 
-    // Load the configuration
+    // Charger la configuration
     let configs = match ServerConfig::from_file("config.toml") {
         Ok(c) => c,
         Err(e) => {
-            logger.error(&format!("Failed to load configuration: {}", e));
+            logger.error(&format!("Échec du chargement de la configuration : {}", e));
             process::exit(1);
         }
     };
 
-    // Create upload repository if it doesn't exist
+    // Créer le répertoire des téléchargements s'il n'existe pas
     if let Err(e) = fs::create_dir_all("uploads") {
-        eprintln!("Failed to create upload directory: {}", e);
+        eprintln!(
+            "Échec de la création du répertoire des téléchargements : {}",
+            e
+        );
     }
 
-    // Create and run the server
+    // Créer et exécuter le serveur
     match Server::new(configs, logger.clone()) {
         Ok(mut server) => {
             if let Err(e) = server.run() {
-                logger.error(&format!("Server error: {}", e));
+                logger.error(&format!("Erreur du serveur : {}", e));
                 process::exit(1);
             }
         }
         Err(e) => {
-            logger.error(&format!("Failed to create server: {}", e));
+            logger.error(&format!("Échec de la création du serveur : {}", e));
             process::exit(1);
         }
     }
