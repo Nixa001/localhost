@@ -1,7 +1,6 @@
 mod cgi;
 mod config;
 mod error;
-mod error_handler;
 mod http;
 mod logger;
 mod router;

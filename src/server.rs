@@ -18,6 +18,7 @@ use std::net::TcpListener as StdTcpListener;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::thread::panicking;
 use std::time::{Duration, Instant};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -203,7 +204,10 @@ impl Server {
                 "<td>{}</td>",
                 modified.format("%Y-%m-%d %H:%M:%S")
             ));
-            if !is_dir {
+
+            print!("{}", full_path);
+            let path: String = String::from("/uploads");
+            if !is_dir && full_path.contains(&path) {
                 html.push_str(&format!(
                     r#"<td>
                     <form action="{}" method="post" style="display:inline;">
@@ -439,7 +443,7 @@ impl Server {
                 let session_id = self.create_session_id(request);
                 self.session_manager.authenticate(&session_id);
                 let mut response = HttpResponse::new(302, Vec::new(), "text/plain");
-                response 
+                response
                     .headers
                     .insert("Location".to_string(), "/".to_string());
                 response.headers.insert(
